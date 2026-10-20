@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./App.css";
 function App() {
   const [count, setCount] = useState(0)
@@ -12,6 +12,21 @@ function App() {
   const [productName, setProductName] = useState("");
   const [productPrice, setProductPrice] = useState("");
   const [productStock, setProductStock] = useState("");
+  useEffect(() => {
+    fetch("http://127.0.0.1:8001/api/products")
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("商品資料取得失敗");
+        }
+        return response.json();
+      })
+      .then((data) => {
+        setProducts(data);
+      })
+      .catch((error) => {
+        console.error("API 錯誤：", error);
+      });
+  }, []);
 
   function add() {
     setCount(count + 1)
@@ -42,31 +57,51 @@ function App() {
   function changePrice(event) {
     setPrice(event.target.value);
   }
-  function addProduct() {
+  async function addProduct() {
     if (!productName.trim() || productPrice === "" || productStock === "") {
       alert("請填寫完整商品資料");
       return;
     }
 
-    if (Number(productPrice) <= 0 || Number(productStock) < 0) {
+    if (
+      Number(productPrice) <= 0 ||
+      Number(productStock) < 0 ||
+      !Number.isInteger(Number(productStock))
+    ) {
       alert("請輸入正確的價格與庫存");
       return;
     }
 
-    const newProduct = {
-      id: Date.now(),
-      name: productName,
-      price: Number(productPrice),
-      stock: Number(productStock)
-    };
+    try {
+      const response = await fetch("http://127.0.0.1:8001/api/products", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: productName.trim(),
+          price: Number(productPrice),
+          stock: Number(productStock)
+        })
+      });
 
-    setProducts([...products, newProduct]);
+      if (!response.ok) {
+        throw new Error("商品新增失敗");
+      }
 
-    setProductName("");
-    setProductPrice("");
-    setProductStock("");
+      const data = await response.json();
 
-    alert("商品新增成功！");
+      setProducts((prevProducts) => [...prevProducts, data.product]);
+
+      setProductName("");
+      setProductPrice("");
+      setProductStock("");
+
+      alert("商品新增成功！");
+    } catch (error) {
+      console.error("新增商品錯誤：", error);
+      alert("商品新增失敗，請檢查 FastAPI 是否正常運作");
+    }
   }
   function addToCart(product) {
     const existingItem = cart.find(
