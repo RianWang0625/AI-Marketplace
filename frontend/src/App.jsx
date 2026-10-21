@@ -12,6 +12,9 @@ function App() {
   const [productName, setProductName] = useState("");
   const [productPrice, setProductPrice] = useState("");
   const [productStock, setProductStock] = useState("");
+  const [searchText, setSearchText] = useState("");
+  const [productImage, setProductImage] = useState(null);
+
   useEffect(() => {
     fetch("http://127.0.0.1:8001/api/products")
       .then((response) => {
@@ -73,17 +76,48 @@ function App() {
     }
 
     try {
-      const response = await fetch("http://127.0.0.1:8001/api/products", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          name: productName.trim(),
-          price: Number(productPrice),
-          stock: Number(productStock)
-        })
-      });
+      // 1. 預設沒有商品圖片
+      let imageUrl = null;
+
+      // 2. 如果賣家有選擇圖片，先上傳
+      if (productImage) {
+        const formData = new FormData();
+
+        formData.append("file", productImage);
+
+        const uploadResponse = await fetch(
+          "http://127.0.0.1:8001/api/upload-image",
+          {
+            method: "POST",
+            body: formData
+          }
+        );
+
+        if (!uploadResponse.ok) {
+          throw new Error("圖片上傳失敗");
+        }
+
+        const uploadData = await uploadResponse.json();
+
+        imageUrl = uploadData.image_url;
+      }
+
+      // 3. 將商品資料與圖片網址一起送到 FastAPI
+      const response = await fetch(
+        "http://127.0.0.1:8001/api/products",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            name: productName.trim(),
+            price: Number(productPrice),
+            stock: Number(productStock),
+            image_url: imageUrl
+          })
+        }
+      );
 
       if (!response.ok) {
         throw new Error("商品新增失敗");
@@ -91,16 +125,31 @@ function App() {
 
       const data = await response.json();
 
-      setProducts((prevProducts) => [...prevProducts, data.product]);
+      // 4. 更新商品列表
+      setProducts((prevProducts) => {
+        const exists = prevProducts.some(
+          (item) => item.id === data.product.id
+        );
 
+        if (exists) {
+          return prevProducts.map((item) =>
+            item.id === data.product.id ? data.product : item
+          );
+        }
+
+        return [data.product, ...prevProducts];
+      });
+
+      // 5. 清空表單
       setProductName("");
       setProductPrice("");
       setProductStock("");
+      setProductImage(null);
 
       alert("商品新增成功！");
     } catch (error) {
       console.error("新增商品錯誤：", error);
-      alert("商品新增失敗，請檢查 FastAPI 是否正常運作");
+      alert(error.message || "商品新增失敗");
     }
   }
   function addToCart(product) {
@@ -202,19 +251,54 @@ function App() {
           {products.length === 0 ? (
             <p>目前沒有商品</p>
           ) : (
-            <div>
-              {products.map((item) => (
-                <div key={item.id}>
-                  <h3>{item.name}</h3>
-                  <p>價格：{item.price} 元</p>
-                  <p>庫存：{item.stock} 件</p>
 
-                  <button onClick={() => addToCart(item)}>
-                    加入購物車
+            <>
+              <div className="buyer-search">
+                <span className="search-icon">⌕</span>
+
+                <input
+                  type="text"
+                  placeholder="搜尋商品名稱、品牌或關鍵字..."
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                />
+
+                {searchText && (
+                  <button
+                    type="button"
+                    className="search-clear"
+                    onClick={() => setSearchText("")}
+                  >
+                    清除
                   </button>
-                </div>
-              ))}
-            </div>
+                )}
+              </div>
+
+              <div className="buyer-product-grid">
+                {products
+                  .filter((item) =>
+                    item.name.toLowerCase().includes(searchText.trim().toLowerCase())
+                  )
+                  .map((item) => (
+                    <div className="buyer-product-card" key={item.id}>
+                      <div className="product-image">
+                        {item.image_url ? (
+                          <img src={item.image_url} alt={item.name} />
+                        ) : (
+                          <span>暫無商品圖片</span>
+                        )}
+                      </div>
+                      <h3>{item.name}</h3>
+                      <p>價格：{item.price} 元</p>
+                      <p>庫存：{item.stock} 件</p>
+
+                      <button onClick={() => addToCart(item)}>
+                        加入購物車
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </>
           )}
         </div>
       ) : page === "cart" ? (
@@ -299,21 +383,175 @@ function App() {
             />
           </div>
 
+          <div>
+            <label>商品圖片：</label>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(e) => {
+                setProductImage(e.target.files[0] || null);
+              }}
+            />
+          </div>
+
           <button onClick={addProduct}>
             確認新增商品
           </button>
         </div>
       ) : page === "myProducts" ? (
-        <div>
+        <div className="seller-container">
           <h2>我的商品</h2>
 
           {products.map((item) => (
-            <div key={item.id}>
+            <div key={item.id} className="seller-product-card">
               <h3>{item.name}</h3>
               <p>價格：{item.price} 元</p>
-              <p>庫存：{item.stock} 件</p>
+              <p>目前庫存：{item.stock} 件</p>
+              <div className="seller-form-field">
+                <label>修改商品名稱：</label>
+                <input
+                  type="text"
+                  defaultValue={item.name}
+                  id={`name-${item.id}`}
+                />
+              </div>
+              <div className="seller-form-field">
+                <label>修改商品價格：</label>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  defaultValue={item.price}
+                  id={`price-${item.id}`}
+                />
+              </div>
+
+              <div className="seller-form-field">
+                <label>修改商品庫存：</label>
+
+                <input
+                  type="number"
+                  min="0"
+                  defaultValue={item.stock}
+                  id={`stock-${item.id}`}
+                />
+              </div>
+
+              <button
+                onClick={async () => {
+                  const newName = document
+                    .getElementById(`name-${item.id}`)
+                    .value.trim();
+
+                  const priceText = document
+                    .getElementById(`price-${item.id}`)
+                    .value;
+
+                  const newPrice = Number(priceText);
+
+                  const stockText = document.getElementById(
+                    `stock-${item.id}`
+                  ).value;
+
+                  const newStock = Number(stockText);
+
+                  if (
+                    !newName ||
+                    priceText === "" ||
+                    !Number.isFinite(newPrice) ||
+                    newPrice <= 0
+                  ) {
+                    alert("請輸入正確的商品名稱與價格");
+                    return;
+                  }
+
+                  if (
+                    stockText.trim() === "" ||
+                    !Number.isInteger(newStock) ||
+                    newStock < 0
+                  ) {
+                    alert("請輸入正確的商品庫存（0 或正整數）");
+                    return;
+                  }
+
+                  try {
+                    console.log("庫存輸入值：", stockText);
+                    console.log("準備送出的庫存：", newStock);
+                    const response = await fetch(
+                      `http://127.0.0.1:8001/api/products/${item.id}/details`,
+                      {
+                        method: "PUT",
+                        headers: {
+                          "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                          name: newName,
+                          price: newPrice,
+                          stock: newStock
+                        })
+                      }
+                    );
+
+                    if (!response.ok) {
+                      throw new Error("修改商品失敗");
+                    }
+
+                    setProducts((prevProducts) =>
+                      prevProducts.map((product) =>
+                        product.id === item.id
+                          ? { ...product, name: newName, price: newPrice }
+                          : product
+                      )
+                    );
+
+                    alert("商品資訊修改成功！");
+                  } catch (error) {
+                    alert(error.message);
+                  }
+                }}
+              >
+                儲存所有修改
+              </button>
+
+              <button
+                onClick={async () => {
+                  const confirmed = window.confirm(
+                    `確定要刪除「${item.name}」嗎？刪除後無法復原。`
+                  );
+
+                  if (!confirmed) {
+                    return;
+                  }
+
+                  try {
+                    const response = await fetch(
+                      `http://127.0.0.1:8001/api/products/${item.id}`,
+                      {
+                        method: "DELETE"
+                      }
+                    );
+
+                    if (!response.ok) {
+                      throw new Error("刪除商品失敗");
+                    }
+
+                    setProducts((prevProducts) =>
+                      prevProducts.filter(
+                        (product) => product.id !== item.id
+                      )
+                    );
+
+                    alert("商品刪除成功！");
+                  } catch (error) {
+                    alert(error.message);
+                  }
+                }}
+              >
+                刪除商品
+              </button>
             </div>
           ))}
+
         </div>
       ) : page === "orders" ? (
         <div>
