@@ -43,6 +43,7 @@ class ProductUpdate(BaseModel):
     name: str = Field(min_length=1)
     price: float = Field(gt=0)
     stock: int = Field(ge=0)
+    image_url: str | None = None
 
 @app.get("/")
 def home():
@@ -227,13 +228,15 @@ def update_product_details(product_id: int, product: ProductUpdate):
             UPDATE products
             SET name = %s,
                 price = %s,
-                stock = %s
+                stock = %s,
+                image_url = COALESCE(%s, image_url)
             WHERE id = %s
               AND seller_id = %s
         """, (
             product.name,
             product.price,
             product.stock,
+            product.image_url,
             product_id,
             1
         ))

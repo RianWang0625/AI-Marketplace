@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import "./App.css";
 function App() {
   const [count, setCount] = useState(0)
@@ -14,6 +14,23 @@ function App() {
   const [productStock, setProductStock] = useState("");
   const [searchText, setSearchText] = useState("");
   const [productImage, setProductImage] = useState(null);
+  const [editingImages, setEditingImages] = useState({});
+  const [previewUrl, setPreviewUrl] = useState("");
+  const imageInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!productImage) {
+      setPreviewUrl("");
+      return;
+    }
+
+    const url = URL.createObjectURL(productImage);
+    setPreviewUrl(url);
+
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [productImage]);
 
   useEffect(() => {
     fetch("http://127.0.0.1:8001/api/products")
@@ -97,6 +114,7 @@ function App() {
           throw new Error("圖片上傳失敗");
         }
 
+
         const uploadData = await uploadResponse.json();
 
         imageUrl = uploadData.image_url;
@@ -145,6 +163,9 @@ function App() {
       setProductPrice("");
       setProductStock("");
       setProductImage(null);
+      if (imageInputRef.current) {
+        imageInputRef.current.value = "";
+      }
 
       alert("商品新增成功！");
     } catch (error) {
@@ -386,12 +407,27 @@ function App() {
           <div>
             <label>商品圖片：</label>
             <input
+              ref={imageInputRef}
               type="file"
               accept="image/jpeg,image/png,image/webp"
               onChange={(e) => {
                 setProductImage(e.target.files[0] || null);
               }}
             />
+            {productImage && (
+              <div>
+                <p>圖片預覽：</p>
+                <img
+                  src={previewUrl}
+                  alt="商品預覽"
+                  style={{
+                    width: "150px",
+                    height: "150px",
+                    objectFit: "cover",
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           <button onClick={addProduct}>
@@ -437,6 +473,22 @@ function App() {
                 />
               </div>
 
+              <div className="seller-form-field">
+                <label>更換商品圖片：</label>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+
+                    setEditingImages((prev) => ({
+                      ...prev,
+                      [item.id]: file || null,
+                    }));
+                  }}
+                />
+              </div>
+              <EditImagePreview file={editingImages[item.id]} />
               <button
                 onClick={async () => {
                   const newName = document
@@ -454,6 +506,8 @@ function App() {
                   ).value;
 
                   const newStock = Number(stockText);
+
+                  const newImage = editingImages[item.id] || null;
 
                   if (
                     !newName ||
@@ -473,12 +527,35 @@ function App() {
                     alert("請輸入正確的商品庫存（0 或正整數）");
                     return;
                   }
-
                   try {
+                    let imageUrl = null;
+
+                    if (newImage) {
+                      const formData = new FormData();
+                      formData.append("file", newImage);
+
+                      const uploadResponse = await fetch(
+                        "http://127.0.0.1:8001/api/upload-image",
+                        {
+                          method: "POST",
+                          body: formData,
+                        }
+                      );
+
+                      if (!uploadResponse.ok) {
+                        throw new Error("新圖片上傳失敗");
+                      }
+
+                      const uploadData = await uploadResponse.json();
+                      imageUrl = uploadData.image_url;
+                    }
+
                     console.log("庫存輸入值：", stockText);
                     console.log("準備送出的庫存：", newStock);
+
                     const response = await fetch(
                       `http://127.0.0.1:8001/api/products/${item.id}/details`,
+
                       {
                         method: "PUT",
                         headers: {
@@ -487,7 +564,8 @@ function App() {
                         body: JSON.stringify({
                           name: newName,
                           price: newPrice,
-                          stock: newStock
+                          stock: newStock,
+                          image_url: imageUrl
                         })
                       }
                     );
@@ -569,4 +647,40 @@ function App() {
 
 }
 
+function EditImagePreview({ file }) {
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    if (!file) {
+      setUrl("");
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [file]);
+
+  if (!file || !url) {
+    return null;
+  }
+
+  return (
+    <div className="seller-form-field">
+      <p>新商品圖片預覽：</p>
+      <img
+        src={url}
+        alt="新商品圖片預覽"
+        style={{
+          width: "150px",
+          height: "150px",
+          objectFit: "contain",
+        }}
+      />
+    </div>
+  );
+}
 export default App;
