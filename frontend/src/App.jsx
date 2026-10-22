@@ -577,7 +577,13 @@ function App() {
                     setProducts((prevProducts) =>
                       prevProducts.map((product) =>
                         product.id === item.id
-                          ? { ...product, name: newName, price: newPrice }
+                          ? {
+                            ...product,
+                            name: newName,
+                            price: newPrice,
+                            stock: newStock,
+                            image_url: imageUrl ?? product.image_url
+                          }
                           : product
                       )
                     );
