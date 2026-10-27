@@ -6,7 +6,20 @@ import mysql.connector
 from pathlib import Path
 import shutil
 import uuid
+import os
+import jwt
+from datetime import datetime, timedelta, timezone
+from dotenv import load_dotenv
 from pwdlib import PasswordHash
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+
+if not JWT_SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY 尚未設定")
 
 app = FastAPI()
 password_hash = PasswordHash.recommended()
@@ -38,6 +51,10 @@ class UserRegister(BaseModel):
     password: str = Field(min_length=8)
     role: str = "buyer"
 
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
 class ProductCreate(BaseModel):
     name: str = Field(min_length=1)
     price: float = Field(gt=0)
@@ -56,6 +73,80 @@ class ProductUpdate(BaseModel):
 @app.get("/")
 def home():
     return {"message": "AI Marketplace API is running"}
+
+@app.post("/api/login")
+def login(user: UserLogin):
+    connection = None
+    cursor = None
+
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT id, username, password_hash, role
+            FROM users
+            WHERE username = %s
+        """, (user.username,))
+
+        db_user = cursor.fetchone()
+
+        if db_user is None:
+            raise HTTPException(
+                status_code=401,
+                detail="帳號或密碼錯誤"
+            )
+
+        if not password_hash.verify(
+            user.password,
+            db_user["password_hash"]
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="帳號或密碼錯誤"
+            )
+
+        # 設定 Token 到期時間
+        expire = datetime.now(timezone.utc) + timedelta(
+            minutes=JWT_EXPIRE_MINUTES
+        )
+
+        # 建立 JWT 內容
+        payload = {
+            "sub": str(db_user["id"]),
+            "username": db_user["username"],
+            "role": db_user["role"],
+            "exp": expire
+        }
+
+        # 使用密鑰簽署 JWT
+        access_token = jwt.encode(
+            payload,
+            JWT_SECRET_KEY,
+            algorithm="HS256"
+        )
+
+        return {
+            "message": "登入成功",
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user_id": db_user["id"],
+            "username": db_user["username"],
+            "role": db_user["role"]
+        }
+
+    except mysql.connector.Error:
+        raise HTTPException(
+            status_code=500,
+            detail="會員登入失敗"
+        )
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+
+        if connection is not None:
+            connection.close()
 
 @app.post("/api/register", status_code=201)
 def register(user: UserRegister):
