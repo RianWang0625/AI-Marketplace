@@ -6,8 +6,10 @@ import mysql.connector
 from pathlib import Path
 import shutil
 import uuid
+from pwdlib import PasswordHash
 
 app = FastAPI()
+password_hash = PasswordHash.recommended()
 
 from fastapi.staticfiles import StaticFiles
 
@@ -30,6 +32,12 @@ app.add_middleware(
 )
 
 
+class UserRegister(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    email: str = Field(min_length=5, max_length=255)
+    password: str = Field(min_length=8)
+    role: str = "buyer"
+
 class ProductCreate(BaseModel):
     name: str = Field(min_length=1)
     price: float = Field(gt=0)
@@ -48,6 +56,73 @@ class ProductUpdate(BaseModel):
 @app.get("/")
 def home():
     return {"message": "AI Marketplace API is running"}
+
+@app.post("/api/register", status_code=201)
+def register(user: UserRegister):
+    if user.role not in ("buyer", "seller"):
+        raise HTTPException(
+            status_code=400,
+            detail="角色只能是 buyer 或 seller"
+        )
+
+    hashed_password = password_hash.hash(user.password)
+
+    connection = None
+    cursor = None
+
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            INSERT INTO users (username, email, password_hash, role)
+            VALUES (%s, %s, %s, %s)
+        """, (
+            user.username,
+            user.email,
+            hashed_password,
+            user.role
+        ))
+
+        connection.commit()
+
+        return {
+            "message": "會員註冊成功",
+            "user_id": cursor.lastrowid,
+            "username": user.username,
+            "role": user.role
+        }
+
+    except mysql.connector.IntegrityError as error:
+        if connection is not None:
+            connection.rollback()
+
+        if error.errno == 1062:
+            raise HTTPException(
+                status_code=409,
+                detail="帳號或 Email 已被使用"
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail="會員註冊失敗"
+        )
+
+    except mysql.connector.Error:
+        if connection is not None:
+            connection.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="會員註冊失敗"
+        )
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+
+        if connection is not None:
+            connection.close()
 
 
 # 取得 MySQL 中的所有商品
